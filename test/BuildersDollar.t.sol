@@ -5,17 +5,21 @@ import {BuildersDollar} from "../src/BuildersDollar.sol";
 import {Test} from "forge-std/Test.sol";
 import {EIP173Proxy} from "../src/proxy/EIP173Proxy.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-
+import { IPool } from "lib/aave-v3/contracts/interfaces/IPool.sol";
 interface Depositable {
     function deposit() external payable;
 }
 
 interface IERC20Depositable is Depositable, IERC20 {}
+interface NativeDepositContract{
+    function depositETH(address pool, address onBehalfOf, uint16 referralCode) external payable;
+}
 
 contract BuildersDollarTest is Test {
     address public constant daiAddress = 0xDA10009cBd5D07dd0CeCc66161FC93D7c9000da1;
     address public constant aDaiAddress = 0x82E64f49Ed5EC1bC6e43DAD4FC8Af9bb3A2312EE;
     address public constant poolAddress = 0x794a61358D6845594F94dc1DB02A252b5b4814aD;
+    NativeDepositContract public constant ethDepositPoolAddress = NativeDepositContract(0x86b4D2636EC473AC4A5dD83Fc2BEDa98845249A7);
     address public constant rewardsAddress = 0x929EC64c34a17401F460460D4B9390518E5B473e;
     address public constant admin = 0x6A148b997e6651237F2fCfc9E30330a6480519f0;
     address public constant signer = 0x4B5BaD436CcA8df3bD39A095b84991fAc9A226F1;
@@ -26,8 +30,6 @@ contract BuildersDollarTest is Test {
     BuildersDollar public buildersDollar;
 
     function setUp() public {
-        vm.rollFork(125665270);
-
         vm.startPrank(admin);
         address buildersDollarAddress = address(
             new BuildersDollar(
@@ -171,13 +173,24 @@ contract BuildersDollarTest is Test {
     function test_yield_accuumulation() public {
         uint256 balanceOfDAI_HOLDER = dai.balanceOf(DAI_HOLDER);
         assertGt(balanceOfDAI_HOLDER, 0);
-        vm.prank(DAI_HOLDER);
-        dai.approve(address(buildersDollar), balanceOfDAI_HOLDER);
-        vm.prank(DAI_HOLDER);
-        buildersDollar.mint(balanceOfDAI_HOLDER, DAI_HOLDER);
-        vm.rollFork(127665270);
+        vm.startPrank(DAI_HOLDER);
+        dai.approve(address(buildersDollar), balanceOfDAI_HOLDER/2);
+        buildersDollar.mint(balanceOfDAI_HOLDER/3, DAI_HOLDER);
+        uint256 buildersDollarBalance = buildersDollar.balanceOf(DAI_HOLDER);
+        assertGt(buildersDollarBalance, 0);
+        IPool pool = IPool(poolAddress);
+        vm.deal(DAI_HOLDER, 100000000 ether);
+        ethDepositPoolAddress.depositETH{value: 10000 ether}(poolAddress, DAI_HOLDER, 0);
+        pool.borrow(address(dai), 1000e18,2, 0, DAI_HOLDER);
+        vm.roll(block.number + 1000000);
+        vm.warp(block.timestamp + 1000000);
+        dai.approve(address(pool), 1000e18);
+        pool.repay(address(dai), 1000e18, 2,DAI_HOLDER);
+        vm.roll(block.number + 1000000);
+        vm.warp(block.timestamp + 1000000);
         uint256 yieldAccured = buildersDollar.yieldAccrued();
         assertGt(yieldAccured, 0);
+        vm.stopPrank();
 
     }
 }
