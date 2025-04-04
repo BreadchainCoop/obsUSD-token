@@ -30,8 +30,14 @@ contract BuilderDollar is ERC20Upgradeable, OwnableUpgradeable, ReentrancyGuardU
 
     /// @notice Modifier to check if the caller is the yield claimer
     modifier onlyYieldClaimer() {
-        _checkYieldClaimer();
+        if (yieldClaimer != msg.sender) {
+            revert OnlyClaimers();
+        }
         _;
+    }
+
+    constructor() {
+        _disableInitializers();
     }
 
     /// @inheritdoc IBuilderDollar
@@ -92,11 +98,14 @@ contract BuilderDollar is ERC20Upgradeable, OwnableUpgradeable, ReentrancyGuardU
     /// @inheritdoc IBuilderDollar
     function claimYield(uint256 _amount) external onlyYieldClaimer {
         if (_amount == 0) revert ClaimZero();
-        uint256 yield = _yieldAccrued();
+        uint256 yield = yieldAccrued();
         if (yield < _amount) revert YieldInsufficient();
 
         uint256 yieldToDistribute = _amount * 90 / 100;
-        uint256 yieldTributeAmount = _amount - yieldToDistribute;
+        uint256 yieldTributeAmount;
+        unchecked {
+            yieldTributeAmount = _amount - yieldToDistribute;
+        }
 
         POOL.withdraw(address(TOKEN), yieldToDistribute, yieldClaimer);
         POOL.withdraw(address(TOKEN), yieldTributeAmount, yieldTribute);
@@ -107,34 +116,16 @@ contract BuilderDollar is ERC20Upgradeable, OwnableUpgradeable, ReentrancyGuardU
     function rescueToken(address _token, uint256 _amount) external onlyOwner {
         require(_token != address(A_TOKEN), "BuilderDollar: cannot withdraw collateral");
         IERC20(_token).safeTransfer(owner(), _amount);
+        emit RescuedToken(_token, _amount);
     }
 
     /// @inheritdoc IBuilderDollar
-    function yieldAccrued() external view returns (uint256) {
-        return _yieldAccrued();
+    function yieldAccrued() public view returns (uint256 _yield) {
+        _yield = A_TOKEN.balanceOf(address(this)) - totalSupply();
     }
 
     /// @inheritdoc ERC20Upgradeable
     function decimals() public view override returns (uint8 __decimals) {
         __decimals = _decimals;
-    }
-
-    // --- Internal Utilities ---
-
-    /**
-     * @notice Returns the yield accrued by the contract
-     * @return _yield yield accrued by the contract
-     */
-    function _yieldAccrued() internal view returns (uint256 _yield) {
-        _yield = A_TOKEN.balanceOf(address(this)) - totalSupply();
-    }
-
-    /**
-     * @notice Checks if the caller is the yield claimer
-     */
-    function _checkYieldClaimer() internal view virtual {
-        if (yieldClaimer != msg.sender) {
-            revert OwnableUnauthorizedAccount(msg.sender);
-        }
     }
 }
